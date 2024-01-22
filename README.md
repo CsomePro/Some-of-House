@@ -21,6 +21,7 @@ House of some具有以下优点：
 在exit退出之后使用如下脚本即可
 
 ```python
+from House_of_some import HouseOfSome
 io = process("./demo")
 
 ...
