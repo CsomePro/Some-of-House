@@ -164,7 +164,7 @@ int main(){
 
 **Parameters**
 
-- libc([ELF](https://docs.pwntools.com/en/latest/elf/elf.html#pwnlib.elf.elf.ELF)) - 文件表述符
+- libc([ELF](https://docs.pwntools.com/en/latest/elf/elf.html#pwnlib.elf.elf.ELF)) - libc文件ELF对象
 - controled_addr(int) - 可写地址，作为延长的IO_list_all中的io file写入的起始地址
 - zero_addr(int) - 内容常0的地址
 
