@@ -14,4 +14,6 @@ jobs:
       uses: actions/checkout@v2
 
     - name: Zip files
-      run: ls  # 替换 your_folder 为需要压缩的文件夹路径
+      run: zip -r release.zip .  # 替换 your_folder 为需要压缩的文件夹路径
+    
+    
