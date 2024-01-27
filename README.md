@@ -156,14 +156,14 @@ hos = HouseOfSome(libc=libc, controled_addr=fake_file_start)
 hos.bomb(io, libc.symbols['_IO_file_underflow'] + 390)
 ```
 
-#### bomb(io, retn_addr) -> None
+#### bomb(io, retn_addr=0) -> None
 
 直接一把梭提权，运用[pwntools自带工具ROP](https://docs.pwntools.com/en/latest/rop/rop.html)，其中执行函数为`rop.call('execve', [b'/bin/sh', 0, 0])`
 
 **Parameters**
 
 - io([tube](https://docs.pwntools.com/en/latest/tubes.html#pwnlib.tubes.tube.tube)) - 交互IO，详细见pwntools文档
-- retn_addr(int) - 在运行到IO_new_read_file栈中，存放的返回地址，用于计算返回地址与_envrion泄露的栈的偏移
+- retn_addr(int) - (可选)在运行到IO_new_read_file栈中，存放的返回地址，用于计算返回地址与_envrion泄露的栈的偏移。如果不设置，则会从泄露的栈中寻找IO_flush_all的地址
 
 #### read(fd, buf, len, end=0) -> bytes
 
@@ -182,14 +182,14 @@ hos.bomb(io, libc.symbols['_IO_file_underflow'] + 390)
 - buf(int) - 待读取的地址
 - len(int) - 读取长度
 
-#### bomb_raw(io, retn_addr) -> int
+#### bomb_raw(io, retn_addr=0) -> int
 
 执行此函数之后，当前io处在等待输入，并即将写入ROP
 
 **Parameters**
 
 - io([tube](https://docs.pwntools.com/en/latest/tubes.html#pwnlib.tubes.tube.tube)) - 交互IO，详细见pwntools文档
-- retn_addr(int) - 在运行到IO_new_read_file栈中，存放的返回地址，用于计算返回地址与_envrion泄露的栈的偏移
+- retn_addr(int) - (可选)在运行到IO_new_read_file栈中，存放的返回地址，用于计算返回地址与_envrion泄露的栈的偏移。如果不设置，则会从泄露的栈中寻找IO_flush_all的地址
 
 **return**
 
