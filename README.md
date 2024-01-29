@@ -1,31 +1,19 @@
-# House of Some x Illusion
+# Some of House
 
-一种新的IO_FILE利用思路，利用条件为
+House实用小工具合集
 
-1. 已知glibc基地址
-2. 可控的地址（可写入内容构造fake file）
-3. 需要一次libc内任意地址写可控地址
-4. 程序能正常退出或者通过exit()退出
-
-House of some具有以下优点：
-
-1. 无视目前的`IO_validate_vtable`检查（wide_data的vtable加上检查也可以使用）
-2. 第一次任意地址写要求低
-3. 最后攻击提权是栈上ROP，可以不需要栈迁移
-4. 源码级攻击，不依赖编译结果
-
-详细思路见
+## 目前已包含的House
 
 House of Some: https://blog.csome.cc/p/house-of-some/
 
 House of Illusion: https://enllus1on.github.io/2024/01/22/new-read-write-primitive-in-glibc-2-38/#more
 
-## 自动化
+## HouseOfSome x Illusion的自动化
 
 在exit退出之后使用如下脚本即可
 
 ```python
-from House_of_some import HouseOfSome
+from SomeofHouse import HouseOfSome
 io = process("./demo")
 
 ...
@@ -42,7 +30,7 @@ hos.bomb(io)
 
 ```python
 from pwn import *
-from House_of_some import HouseOfSome
+from SomeofHouse import HouseOfSome
 
 context.log_level = 'debug'
 context.arch = 'amd64'
