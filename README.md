@@ -1,5 +1,7 @@
 # Some of House
 
+[![Hits](https://hits.sh/github.com/CsomePro/Some-of-House.svg?label=Visitors)](https://hits.sh/github.com/CsomePro/Some-of-House/)
+
 House实用小工具合集
 
 ## 目前已包含的House
