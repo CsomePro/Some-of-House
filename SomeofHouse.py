@@ -6,6 +6,7 @@ ref: https://enllus1on.github.io/2024/01/22/new-read-write-primitive-in-glibc-2-
 
 from pwn import *
 import bisect
+from typing import Callable
 # context.arch = "amd64"
 
 class HouseOfSome:
@@ -169,12 +170,12 @@ class HouseOfSome:
         next_flush = False
         for i in range(0, len(stack_leak_bytes), 8):
             value = u64(stack_leak_bytes[i:i+8])
+            if value < self.libc.address:
+                continue
             idx = bisect.bisect_left(self.functions, value, key=lambda x: x[0])
             if idx >= len(self.functions) or self.functions[idx][1].address != value:
                 idx -= 1
             if idx < 0 or value - self.functions[idx][1].address >= self.functions[idx][1].size:
-                if value < self.libc.address:
-                    continue
                 # TODO show rwx more info
                 # rwx = ""
                 # rwx += "r" if segment.header.p_flags & 4 else "-"
@@ -199,3 +200,163 @@ class HouseOfSome:
             
             
         
+
+
+class IO_jumps_t:
+    
+    def __init__(self, addr) -> None:
+        self.address = addr
+        self.dummy        = 0
+        self.dummy2       = 0
+        self.finish       = 0
+        self.overflow     = 0
+        self.underflow    = 0
+        self.uflow        = 0
+        self.pbackfail    = 0
+        self.xsputn       = 0
+        self.xsgetn       = 0
+        self.seekoff      = 0
+        self.seekpos      = 0
+        self.setbuf       = 0
+        self.sync         = 0
+        self.doallocate   = 0
+        self.read         = 0
+        self.write        = 0
+        self.seek         = 0
+        self.close        = 0
+        self.stat         = 0
+        self.showmanyc    = 0
+        self.imbue        = 0
+    
+    @classmethod
+    def from_bytes(cls, addr: int, data: bytes):
+        datalist = []
+        for i in range(0, len(data), 8):
+            datalist.append(u64(data[i:i+8]))
+        res = cls(addr)
+        res.dummy        = datalist[0]
+        res.dummy2       = datalist[1]
+        res.finish       = datalist[2]
+        res.overflow     = datalist[3]
+        res.underflow    = datalist[4]
+        res.uflow        = datalist[5]
+        res.pbackfail    = datalist[6]
+        res.xsputn       = datalist[7]
+        res.xsgetn       = datalist[8]
+        res.seekoff      = datalist[9]
+        res.seekpos      = datalist[10]
+        res.setbuf       = datalist[11]
+        res.sync         = datalist[12]
+        res.doallocate   = datalist[13]
+        res.read         = datalist[14]
+        res.write        = datalist[15]
+        res.seek         = datalist[16]
+        res.close        = datalist[17]
+        res.stat         = datalist[18]
+        res.showmanyc    = datalist[19]
+        res.imbue        = datalist[20]
+        return res
+    
+    def print(self):
+        s = ""
+        s += "type struct _IO_jumps_t [0x%x] = \n" % self.address       
+        s += "\t[0]  dummy        = 0x%x\n" % self.dummy       
+        s += "\t[1]  dummy2       = 0x%x\n" % self.dummy2      
+        s += "\t[2]  finish       = 0x%x\n" % self.finish      
+        s += "\t[3]  overflow     = 0x%x\n" % self.overflow    
+        s += "\t[4]  underflow    = 0x%x\n" % self.underflow   
+        s += "\t[5]  uflow        = 0x%x\n" % self.uflow       
+        s += "\t[6]  pbackfail    = 0x%x\n" % self.pbackfail   
+        s += "\t[7]  xsputn       = 0x%x\n" % self.xsputn      
+        s += "\t[8]  xsgetn       = 0x%x\n" % self.xsgetn      
+        s += "\t[9]  seekoff      = 0x%x\n" % self.seekoff     
+        s += "\t[10] seekpos      = 0x%x\n" % self.seekpos     
+        s += "\t[11] setbuf       = 0x%x\n" % self.setbuf      
+        s += "\t[12] sync         = 0x%x\n" % self.sync        
+        s += "\t[13] doallocate   = 0x%x\n" % self.doallocate  
+        s += "\t[14] read         = 0x%x\n" % self.read        
+        s += "\t[15] write        = 0x%x\n" % self.write       
+        s += "\t[16] seek         = 0x%x\n" % self.seek        
+        s += "\t[17] close        = 0x%x\n" % self.close       
+        s += "\t[18] stat         = 0x%x\n" % self.stat        
+        s += "\t[19] showmanyc    = 0x%x\n" % self.showmanyc   
+        s += "\t[20] imbue        = 0x%x\n" % self.imbue       
+        print(s.strip())
+
+
+class HouseLibc:
+    
+    def __init__(self, libc: ELF | str, verbose=False) -> None:
+        if isinstance(libc, ELF):
+            libc = libc.file.name
+        self.libc = ELF(libc, checksec=False)
+        del libc
+        self.jumps_range = self.find_jumps_range(self.libc)
+
+        self.RANGE = (-40, 20)
+        self.verbose = verbose
+
+        self.maybe_file = []
+
+        for i in range(*self.RANGE):
+            dd = self.libc.read(self.libc.symbols['_IO_file_jumps'] + self.jumps_range * i, self.jumps_range)
+            if self.check_jumps(dd):
+                self.maybe_file.append(IO_jumps_t.from_bytes(self.libc.symbols['_IO_file_jumps'] + self.jumps_range * i, dd))
+
+    @staticmethod
+    def find_jumps_range(libc: ELF):
+        """
+        find IO_jumps_t real length 
+        """
+        data = libc.read(libc.symbols['_IO_file_jumps'], 0x200)
+        datalist = []
+        for i in range(0, len(data), 8):
+            datalist.append(u64(data[i:i+8]))
+            # print(f"{i:#x} => {u64(data[i:i+8]):#x}")
+        gauss_range = 2
+        while gauss_range:
+            
+            for i in range(gauss_range):
+                if bool(datalist[i]) != bool(datalist[i + gauss_range]):
+                    break
+            else:
+                break
+            gauss_range += 1
+        return gauss_range * 8
+    
+
+    @staticmethod
+    def check_jumps(data: bytes):
+        """
+        check if data is IO_jumps_t type like or not.
+        """
+        datalist = []
+        for i in range(0, len(data), 8):
+            datalist.append(u64(data[i:i+8]))
+        return datalist[0] == 0 and datalist[1] == 0
+    
+    def find_file_with_cond(self, cond: Callable[[IO_jumps_t, ELF], bool]) -> list[IO_jumps_t]:
+        res = []
+        for i, fp in enumerate(self.maybe_file):
+            if cond(fp, self.libc):
+                res.append(fp)
+                if self.verbose:  # debug
+                    print(f"index: {i}")
+                    fp.print()
+        return res
+    
+    def find__IO_wfile_jumps_maybe_mmap(self) -> IO_jumps_t:
+        
+        def cond(fp: IO_jumps_t, libc: ELF) -> bool:
+            return fp.overflow == libc.symbols['_IO_wfile_overflow'] \
+                and fp.close == libc.symbols['_IO_file_close'] \
+                and fp.underflow != libc.symbols['_IO_wfile_underflow']
+
+        res = self.find_file_with_cond(cond)
+
+        if len(res) > 1:
+            log.warn(f"Find dup _IO_wfile_jumps_maybe_mmap in [{', '.join(map(lambda x: f'{x.address:#x}', res))}], default using 0 index.")
+        if len(res) == 0:
+            raise LookupError("Could not find the _IO_wfile_jumps_maybe_mmap")
+
+        return res[0]
