@@ -287,9 +287,13 @@ class IO_jumps_t:
 class HouseLibc:
     
     def __init__(self, libc: ELF | str, verbose=False) -> None:
+        self.raw_libc: ELF = None
         if isinstance(libc, ELF):
+            self.raw_libc = libc
             libc = libc.file.name
         self.libc = ELF(libc, checksec=False)
+        if not self.raw_libc:
+            self.raw_libc = self.libc
         del libc
         self.jumps_range = self.find_jumps_range(self.libc)
 
@@ -346,7 +350,7 @@ class HouseLibc:
         return res
     
     def find__IO_wfile_jumps_maybe_mmap(self) -> IO_jumps_t:
-        
+        NAME = "_IO_wfile_jumps_maybe_mmap"
         def cond(fp: IO_jumps_t, libc: ELF) -> bool:
             return fp.overflow == libc.symbols['_IO_wfile_overflow'] \
                 and fp.close == libc.symbols['_IO_file_close'] \
@@ -355,8 +359,9 @@ class HouseLibc:
         res = self.find_file_with_cond(cond)
 
         if len(res) > 1:
-            log.warn(f"Find dup _IO_wfile_jumps_maybe_mmap in [{', '.join(map(lambda x: f'{x.address:#x}', res))}], default using 0 index.")
+            log.warn(f"Foound dup {NAME} in [{', '.join(map(lambda x: f'{x.address:#x}', res))}], default using 0 index.")
         if len(res) == 0:
-            raise LookupError("Could not find the _IO_wfile_jumps_maybe_mmap")
-
+            raise LookupError(f"Could not find the {NAME}")
+        if len(res) == 1:
+            log.success(f"Found {NAME} in {res[0].address+self.raw_libc.address:#x}")
         return res[0]
