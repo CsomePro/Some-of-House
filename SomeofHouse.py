@@ -301,7 +301,7 @@ class HouseLibc:
         self.RANGE = (-40, 20)
         self.verbose = verbose
 
-        self.maybe_jumps = []
+        self.maybe_jumps: list[IO_jumps_t] = []
 
         revserse_map = {}
         for k, v in self.libc.symbols.items():
@@ -315,6 +315,9 @@ class HouseLibc:
                     self.maybe_jumps.append(IO_jumps_t.from_bytes(addr, dd, revserse_map[addr]))
                 else:
                     self.maybe_jumps.append(IO_jumps_t.from_bytes(addr, dd))
+
+        self.jumps: dict[str, IO_jumps_t] = {}
+        self.update_symbols()
 
     @staticmethod
     def find_jumps_range(libc: ELF):
@@ -368,14 +371,21 @@ class HouseLibc:
         res = self.find_jumps_with_cond(cond)
 
         if len(res) > 1:
-            log.warn(f"Foound dup {NAME} in [{', '.join(map(lambda x: f'{x.address:#x}', res))}], default using 0 index.")
+            log.warn(f"Found dup {NAME} in [{', '.join(map(lambda x: f'{x.address:#x}', res))}], default using 0 index.")
         if len(res) == 0:
             raise LookupError(f"Could not find the {NAME}")
         if len(res) == 1:
             log.success(f"Found {NAME} in {res[0].address+self.raw_libc.address:#x}")
         res[0].name = "_IO_wfile_jumps_maybe_mmap"
+        self.update_symbols()
         return res[0]
     
     def print_all_jumps(self):
         for fp in self.maybe_jumps:
             fp.print()
+
+    def update_symbols(self):
+        for fp in self.maybe_jumps:
+            if fp.name != "<unknown>":
+                self.jumps[fp.name] = fp
+        
