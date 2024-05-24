@@ -204,7 +204,8 @@ class HouseOfSome:
 
 class IO_jumps_t:
     
-    def __init__(self, addr) -> None:
+    def __init__(self, addr, name) -> None:
+        self.name = name
         self.address = addr
         self.dummy        = 0
         self.dummy2       = 0
@@ -229,11 +230,11 @@ class IO_jumps_t:
         self.imbue        = 0
     
     @classmethod
-    def from_bytes(cls, addr: int, data: bytes):
+    def from_bytes(cls, addr: int, data: bytes, name="<unknown>"):
         datalist = []
         for i in range(0, len(data), 8):
             datalist.append(u64(data[i:i+8]))
-        res = cls(addr)
+        res = cls(addr, name)
         res.dummy        = datalist[0]
         res.dummy2       = datalist[1]
         res.finish       = datalist[2]
@@ -259,7 +260,7 @@ class IO_jumps_t:
     
     def print(self):
         s = ""
-        s += "type struct _IO_jumps_t [0x%x] = \n" % self.address       
+        s += "type struct _IO_jumps_t %s [0x%x] = \n" % (self.name, self.address)       
         s += "\t[0]  dummy        = 0x%x\n" % self.dummy       
         s += "\t[1]  dummy2       = 0x%x\n" % self.dummy2      
         s += "\t[2]  finish       = 0x%x\n" % self.finish      
@@ -300,12 +301,20 @@ class HouseLibc:
         self.RANGE = (-40, 20)
         self.verbose = verbose
 
-        self.maybe_file = []
+        self.maybe_jumps = []
+
+        revserse_map = {}
+        for k, v in self.libc.symbols.items():
+            revserse_map[v] = k
 
         for i in range(*self.RANGE):
             dd = self.libc.read(self.libc.symbols['_IO_file_jumps'] + self.jumps_range * i, self.jumps_range)
             if self.check_jumps(dd):
-                self.maybe_file.append(IO_jumps_t.from_bytes(self.libc.symbols['_IO_file_jumps'] + self.jumps_range * i, dd))
+                addr = self.libc.symbols['_IO_file_jumps'] + self.jumps_range * i
+                if addr in revserse_map:
+                    self.maybe_jumps.append(IO_jumps_t.from_bytes(addr, dd, revserse_map[addr]))
+                else:
+                    self.maybe_jumps.append(IO_jumps_t.from_bytes(addr, dd))
 
     @staticmethod
     def find_jumps_range(libc: ELF):
@@ -339,9 +348,9 @@ class HouseLibc:
             datalist.append(u64(data[i:i+8]))
         return datalist[0] == 0 and datalist[1] == 0
     
-    def find_file_with_cond(self, cond: Callable[[IO_jumps_t, ELF], bool]) -> list[IO_jumps_t]:
+    def find_jumps_with_cond(self, cond: Callable[[IO_jumps_t, ELF], bool]) -> list[IO_jumps_t]:
         res = []
-        for i, fp in enumerate(self.maybe_file):
+        for i, fp in enumerate(self.maybe_jumps):
             if cond(fp, self.libc):
                 res.append(fp)
                 if self.verbose:  # debug
@@ -356,7 +365,7 @@ class HouseLibc:
                 and fp.close == libc.symbols['_IO_file_close'] \
                 and fp.underflow != libc.symbols['_IO_wfile_underflow']
 
-        res = self.find_file_with_cond(cond)
+        res = self.find_jumps_with_cond(cond)
 
         if len(res) > 1:
             log.warn(f"Foound dup {NAME} in [{', '.join(map(lambda x: f'{x.address:#x}', res))}], default using 0 index.")
@@ -364,4 +373,9 @@ class HouseLibc:
             raise LookupError(f"Could not find the {NAME}")
         if len(res) == 1:
             log.success(f"Found {NAME} in {res[0].address+self.raw_libc.address:#x}")
+        res[0].name = "_IO_wfile_jumps_maybe_mmap"
         return res[0]
+    
+    def print_all_jumps(self):
+        for fp in self.maybe_jumps:
+            fp.print()
