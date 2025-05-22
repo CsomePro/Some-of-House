@@ -374,10 +374,10 @@ class HouseOfSome2:
                 "Use debuginfod.sh to download debug info or set args of _IO_wfile_jumps_maybe_mmap and _IO_str_jumps."
             )
 
-        log.success(f"_IO_wfile_jumps_maybe_mmap: {self._IO_wfile_jumps_maybe_mmap:#}")
-        log.info(f"_IO_str_jumps: {self._IO_str_jumps:#}")
-        log.success(f"_IO_default_xsputn: {self._IO_default_xsputn:#}")
-        log.success(f"_IO_default_xsgetn: {self._IO_default_xsgetn:#}")
+        log.success(f"_IO_wfile_jumps_maybe_mmap: {self._IO_wfile_jumps_maybe_mmap:#x}")
+        log.info(f"_IO_str_jumps: {self._IO_str_jumps:#x}")
+        log.success(f"_IO_default_xsputn: {self._IO_default_xsputn:#x}")
+        log.success(f"_IO_default_xsgetn: {self._IO_default_xsgetn:#x}")
     
     def get_first_fake_stdout(self):
         return flat({
