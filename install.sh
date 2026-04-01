@@ -1,2 +1,2 @@
 #!/bin/sh
-apt instlal elfutils debuginfod
+apt install elfutils debuginfod
